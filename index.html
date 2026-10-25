@@ -85,6 +85,8 @@ nav{gap:4px}
 #ysr:empty{display:none}
 #dBgm{max-height:88vh;overflow:auto}
 .tile.yt{background:#000}
+/* 音声のみのときはプレイヤーを画面外に置き、再生インスタンスは維持する */
+.tile.yt.audio-only{position:fixed!important;left:-10000px!important;top:0!important;width:320px!important;height:180px!important;max-width:none!important;max-height:none!important;opacity:0!important;pointer-events:none!important;z-index:-1!important}
 .tile.yt #ytp,.tile.yt iframe{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none}
 .tile.yt .mt{display:none!important}
 .tile.yt .nm{max-width:calc(100% - 20px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:1}
@@ -136,7 +138,7 @@ dialog::backdrop{background:#000a}
 </style>
 </head>
 <body>
-<div id="ver">Ver.26.10.11</div>
+<div id="ver">Ver.26.10.10</div>
 
 <section id="lobby">
   <h1><b>P</b>uchigo<b>M</b>assage<b>S</b>ervice</h1>
@@ -190,7 +192,6 @@ dialog::backdrop{background:#000a}
     <div class="row"><input id="bUrl" placeholder="曲名・アーティスト名、またはURL" autocomplete="off"><button id="bSearch" type="button">検索</button></div>
     <div style="margin-top:12px"><input type="range" id="bSeek" min="0" max="1" value="0" step="1" aria-label="再生位置"><div id="bTime" style="color:var(--dim);font-size:12px;text-align:right">0:00 / 0:00</div></div>
     <div class="row" style="margin-top:8px"><button class="main" id="bPlay">再生</button><button id="bPause">一時停止</button><button id="bStop">停止</button></div>
-    <label class="chk" style="margin-top:10px"><input type="checkbox" id="bVideo" checked>動画も表示する(オフなら音声だけ・この端末のみ)</label>
     <div id="ysr"></div>
     <details style="margin-top:8px"><summary style="color:var(--dim);cursor:pointer;min-height:44px;display:flex;align-items:center">YouTube検索の設定</summary>
       <label for="yKey">YouTube Data API v3 のキー(任意)</label><input id="yKey" placeholder="AIza..." autocomplete="off">
@@ -210,16 +211,18 @@ dialog::backdrop{background:#000a}
     <p id="bTitle" style="color:var(--dim);min-height:1.6em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></p>
     <label for="bVol" style="margin-top:4px">音量</label><input type="range" id="bVol" min="0" max="100" value="30">
     <details><summary style="color:var(--dim);cursor:pointer;min-height:44px;display:flex;align-items:center">オプション</summary>
+      <label class="chk"><input type="checkbox" id="bShowVideo" checked>YouTubeの映像を表示する</label>
       <label class="chk"><input type="checkbox" id="bLoop" checked>くり返す</label>
       <label class="chk"><input type="checkbox" id="bDuck">誰かが話している間は音量を下げる</label>
       <label class="chk"><input type="checkbox" id="bListen" checked>他の人が流すBGMも聴く</label>
       <label class="chk"><input type="checkbox" id="bSync" checked>BGM(YouTube・音声ファイル)を通話中の全員に同期して流す(オフなら自分の端末だけ)</label>
-      <label class="chk"><input type="checkbox" id="bMute">BGM中は自分のマイクをミュートする(エコーの切り分け用。マイクは開いたまま音だけ止めます)</label>
+      <label class="chk"><input type="checkbox" id="bMute">BGM中は自分のマイクを自動でミュート(エコー確認用)</label>
+      <label class="chk"><input type="checkbox" id="bStopMic">BGM中はマイクを完全に止める(スマホの通話モードを解除して音質優先)</label>
+      <label class="chk"><input type="checkbox" id="bNs" checked>BGM中はエコー除去・ノイズ除去を自動でオフ(スピーカーだとエコーが出ます。イヤホン推奨)</label>
       <p style="color:var(--dim);font-size:13px;margin-top:10px">再生すると通話中の全員の端末で同時に流れます(音量は各自で調整できます)。スピーカーだとマイクに入るので、イヤホンがおすすめです。</p>
     </details>
   </div>
 </dialog>
-<div id="ytHide" style="position:fixed;left:-9999px;top:0;width:200px;height:113px" aria-hidden="true"></div>
 <dialog id="dlg">
   <h2 style="font:700 20px 'Shippori Mincho B1',serif;color:var(--sand)">設定</h2>
   <label>マイク</label><select id="sMic"></select>
@@ -243,6 +246,7 @@ dialog::backdrop{background:#000a}
 const $=s=>document.querySelector(s),PFX='betsuhan-v1-',AL='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const RES={720:[1280,720],1080:[1920,1080],1440:[2560,1440]};
 const cfg={mic:'',cam:'',spk:'',res:1080,fps:30,br:4000,echo:true,ns:true,agc:false,facing:'user'};
+let micRaw=false;
 const COLORS=['#d6c7a1','#6fc2b0','#e0a458','#8fb8e8','#c58fe0','#e08fa8'];
 let myColor=(()=>{try{return localStorage.getItem('pms-color')}catch(_){}})()||COLORS[0];
 const rgb=c=>{const n=parseInt(c.slice(1),16);return[n>>16,(n>>8)&255,n&255]};
@@ -265,7 +269,7 @@ function setFocus(el){focusEl=focusEl===el?null:el;refreshFocus()}
 const toast=t=>{const e=document.createElement('div');e.id='toast';e.textContent=t;document.body.append(e);setTimeout(()=>e.remove(),2600)};
 const roomLink=()=>location.origin+location.pathname+'#'+code;
 const gen=()=>Array.from({length:6},()=>AL[Math.random()*AL.length|0]).join('');
-const audioC=()=>({deviceId:cfg.mic?{exact:cfg.mic}:undefined,echoCancellation:cfg.echo,noiseSuppression:cfg.ns,autoGainControl:cfg.agc,channelCount:1,sampleRate:48000,latency:0.01});
+const audioC=()=>({deviceId:cfg.mic?{exact:cfg.mic}:undefined,echoCancellation:micRaw?false:cfg.echo,noiseSuppression:micRaw?false:cfg.ns,autoGainControl:micRaw?false:cfg.agc,channelCount:1,sampleRate:48000,latency:0.01});
 
 // Opus設定:FEC有効・DTX無効・高ビットレート
 function opus(stereo,music){return sdp=>{const m=sdp.match(/a=rtpmap:(\d+) opus\/48000/);if(!m)return sdp;
@@ -342,7 +346,7 @@ async function wake(){try{wl=await navigator.wakeLock.request('screen')}catch(_)
 // LINEなど他アプリから戻ったときの復帰処理
 function recover(){if(!shown||leaving||document.hidden)return;
   actx&&actx.state!=='running'&&actx.resume();wake();
-  const t=local.mic&&local.mic.getAudioTracks()[0];if(t&&t.readyState==='ended')swapMic();
+  const t=local.mic&&local.mic.getAudioTracks()[0];if(t&&t.readyState==='ended'&&!micStopped)swapMic();
   if(peer.destroyed)again(0);else if(peer.disconnected)peer.reconnect();
   setTimeout(relinkAll,1500)}
 document.addEventListener('visibilitychange',recover);['pageshow','online','focus'].forEach(e=>addEventListener(e,recover));
@@ -372,7 +376,7 @@ function mkTile(id,name){const el=document.createElement('div');el.className='ti
   el.querySelector('.zb').onclick=e=>{e.stopPropagation();setFocus(el)};el.querySelector('.fs').onclick=e=>{e.stopPropagation();full()};el.querySelector('.mt').onclick=e=>{e.stopPropagation();const p=el._p;if(!p)return;p.lmuted=!p.lmuted;if(p.audio)p.audio.muted=p.lmuted;e.currentTarget.classList.toggle('off',p.lmuted)};
   el.querySelector('.fl').onclick=e=>{e.stopPropagation();flipCam()};
   if(id==='self')peers.self=Object.assign(peers.self||{},r);return r}
-function watchStream(s,el){actx=actx||new AudioContext();const an=actx.createAnalyser();an.fftSize=512;actx.createMediaStreamSource(s).connect(an);watch.push({an,el,buf:new Uint8Array(an.fftSize)})}
+function watchStream(s,el){actx=actx||new AudioContext({sampleRate:48000});const an=actx.createAnalyser();an.fftSize=512;actx.createMediaStreamSource(s).connect(an);watch.push({an,el,buf:new Uint8Array(an.fftSize)})}
 setInterval(()=>watch.forEach(w=>{w.an.getByteTimeDomainData(w.buf);let m=0;for(const v of w.buf)m=Math.max(m,Math.abs(v-128));if(m>14)w.t=Date.now();const sp=Date.now()-(w.t||0)<350&&!(w.el.classList.contains('self')&&muted);w.el.classList.toggle('speaking',sp);const q=w.el._p;if(q&&q.scr)q.scr.classList.toggle('speaking',sp)}),100);
 
 // 操作
@@ -474,12 +478,11 @@ function parseYT(u){try{const x=new URL(u.trim());let v=x.searchParams.get('v');
 const bgmUI=on=>$('#bBgm').classList.toggle('on',on);
 const ready=()=>yt&&yt.loadVideoById&&yt.getPlayerState;
 // 動画は通話画面のタイルに埋め込み、始まると自動で大きく表示する
-const wantVideo=()=>$('#bVideo').checked;
-function ytShow(){
-  if(!wantVideo()){if(!$('#ytp'))$('#ytHide').innerHTML='<div id="ytp"></div>';return}
-  if(ytTile)return;const t=mkTile('yt','YouTube');t.av.remove();t.vid.remove();t.el.classList.add('yt');
-  t.el.insertAdjacentHTML('afterbegin','<div id="ytp"></div>');ytTile=t;focusEl=t.el;refreshFocus()}
-function ytHide(){$('#ytHide').innerHTML='';if(!ytTile)return;if(focusEl===ytTile.el)focusEl=null;ytTile.el.remove();ytTile=null;refreshFocus()}
+function applyYTVideoVisibility(){if(!ytTile)return;const show=$('#bShowVideo').checked;ytTile.el.classList.toggle('audio-only',!show);if(!show){if(focusEl===ytTile.el)focusEl=null}else if(!focusEl){focusEl=ytTile.el}refreshFocus()}
+function ytShow(){if(ytTile){applyYTVideoVisibility();return}const t=mkTile('yt','YouTube');t.av.remove();t.vid.remove();t.el.classList.add('yt');
+  t.el.insertAdjacentHTML('afterbegin','<div id="ytp"></div>');ytTile=t;applyYTVideoVisibility()}
+$('#bShowVideo').onchange=applyYTVideoVisibility;
+function ytHide(){if(!ytTile)return;if(focusEl===ytTile.el)focusEl=null;ytTile.el.remove();ytTile=null;refreshFocus()}
 function ytGo(){const o=ytPend;if(!o)return;ytPend=null;inList=!!o.list;cur={v:o.v||null,list:o.list||null};
   o.list?yt.loadPlaylist({list:o.list,listType:'playlist',index:o.idx||0,startSeconds:o.pos||0}):yt.loadVideoById({videoId:o.v,startSeconds:o.pos||0});
   yt.setLoop&&yt.setLoop(o.loop!==false)}
@@ -512,13 +515,6 @@ function onBgm(m,name){if(!$('#bListen').checked)return;
   userStop=false;bgmOwner=false;rAud&&rAud.pause();rWant=null;
   if(same&&ready()){yt.seekTo(m.pos+one+.2,true);yt.playVideo();return}
   ytStart(m)}
-// 動画の表示/非表示を切り替えるとiframeを作り直す必要があるため、今の位置から再開する
-function ytRemount(){try{localStorage.setItem('pms-video',wantVideo()?'1':'0')}catch(_){}
-  if(!cur||!ready())return;
-  const o={v:cur.v,list:cur.list,pos:yt.getCurrentTime()||0,idx:yt.getPlaylistIndex?yt.getPlaylistIndex():0,loop:$('#bLoop').checked},was=yt.getPlayerState()===1,own=bgmOwner;
-  stopLocal();bgmOwner=own;ytLoad(o);if(!was)setTimeout(()=>ready()&&yt.pauseVideo(),1200)}
-try{if(localStorage.getItem('pms-video')==='0')$('#bVideo').checked=false}catch(_){}
-$('#bVideo').onchange=ytRemount;
 $('#bBgm').onclick=()=>$('#dBgm').showModal();$('#bClose').onclick=()=>$('#dBgm').close();
 $('#bPlay').onclick=async()=>{aFile.pause();rAud&&rAud.pause();const u=$('#bUrl').value.trim();userStop=false;
   if(ready()&&(!u||u===lastUrl)&&yt.getPlayerState()!==-1){yt.playVideo();bgmOwner=true;sendBgm('play');return}
@@ -541,7 +537,7 @@ setInterval(()=>{if(!ready())return;try{const d=$('#bDuck').checked&&document.qu
 // 音声ファイル:ファイルそのものを各端末へ転送し、各端末で普通のメディアとして再生する
 let aSrc=null,aGain=null,curFile=null,fOwner=false;
 const aFile=$('#aFile');
-function loadMusic(blob,name){actx=actx||new AudioContext();actx.resume();
+function loadMusic(blob,name){actx=actx||new AudioContext({sampleRate:48000});actx.resume();
   if(aFile.src)URL.revokeObjectURL(aFile.src);
   aFile.src=URL.createObjectURL(blob);aFile.loop=$('#bLoop').checked;aFile.classList.remove('hide');$('#bFileOff').classList.remove('hide');
   if(!aSrc){aSrc=actx.createMediaElementSource(aFile);aGain=actx.createGain();aGain.gain.value=+$('#bVol').value/100;aSrc.connect(aGain);aGain.connect(actx.destination)}
@@ -645,11 +641,15 @@ aFile.onseeked=()=>{if(fOwner&&!aFile.paused)fcast(fState('fplay'))};
 aFile.onended=()=>{if(fOwner&&!aFile.loop)fcast({t:'fpause'})};
 setInterval(()=>{const d=$('#bDuck').checked&&document.querySelector('.tile.speaking:not(.self)'),v=+$('#bVol').value/100*(d?.35:1),mute=!$('#bListen').checked;
   if(rAud){rAud.volume=Math.min(1,v);rAud.muted=mute}if(aGain)aGain.gain.value=v},300);
-// BGM中の自動ミュート(任意)。マイクの取得は開いたまま、トラックの有効/無効だけを切り替える(再取得はしない)
-let autoMuted=false;
+// BGM中はマイクの取り込み方を切り替える。スマホはエコー除去つきでマイクを開くと「通話モード」になり、
+// YouTubeなど他の音も通話音質になるため、BGM中はマイクを素の状態で開き直す(または完全に止める)
+let mode=0,modeCnt=0,autoMuted=false,micStopped=false;
 setInterval(()=>{const t=local.mic&&local.mic.getAudioTracks()[0];if(!t)return;
   const bgm=!!((ready()&&yt.getPlayerState()===1)||(aFile.src&&!aFile.paused)||(rAud&&!rAud.paused&&!rAud.muted));
-  const am=$('#bMute').checked&&bgm;
+  const hold=$('#bStopMic').checked&&bgm,want=hold?2:($('#bNs').checked&&bgm?1:0);
+  if(want!==mode){if(++modeCnt>=2){modeCnt=0;mode=want;micStopped=want===2;micRaw=want>0;
+    if(want===2)local.mic.getTracks().forEach(x=>x.stop());else swapMic()}}else modeCnt=0;
+  const am=($('#bMute').checked||hold)&&bgm;
   if(am&&!muted&&!autoMuted){autoMuted=true;muted=true;t.enabled=false;micUI(true)}
   else if(!am&&autoMuted){autoMuted=false;muted=false;t.enabled=true;micUI(false)}},500);
 // BGM画面のタブ切り替え
